@@ -2,9 +2,9 @@
 
 Visualización de datos sobre *The Joshua Tree* (1987), el quinto álbum de U2. La metáfora visual es el árbol de Josué de la contraportada, dibujado aquí con los propios datos del disco:
 
-- **El tronco** está dibujado a partir de las fotos del árbol de la portada y la contraportada, con los mismos tonos que las ramas.
+- **El árbol** sigue la estructura del de la portada y la contraportada: un tronco alto, una guía central que sube hasta la copa, un brazo largo hacia la derecha y otro a la izquierda que sube y luego cae. El tronco y esas ramas de madera no llevan datos.
 - **Cada rama es una canción.** La rama es su forma de onda, de la base (el principio de la canción) a la copa (el final).
-- **Cada copa es un gráfico de radar** con seis atributos sonoros de Spotify: bailabilidad, valencia (positividad), energía, expresión (presencia de voz hablada), instrumentalidad y acústica. Junto a cada copa figuran la duración, el tempo, el tono y, si la hubo, la fecha de publicación como sencillo.
+- **Cada copa es un gráfico de radar** con seis atributos sonoros de Spotify: bailabilidad, valencia (positividad), energía, expresión (presencia de voz hablada), instrumentalidad y acústica. El borde de la copa repite la forma de onda en círculo, como las hojas en punta del árbol. Junto a cada copa figuran la duración, el tempo, el tono y, si la hubo, la fecha de publicación como sencillo.
 - **Las copas pequeñas son las caras B** de los sencillos («Luminous Times», «Walk to the Water», «Spanish Eyes», «Deep in the Heart», «Silver and Gold», «Sweetest Thing» y «Race Against Time»), que brotan de la rama de su sencillo.
 
 Se puede escuchar cada canción pulsando su copa o su rama, que funciona como barra de reproducción. También se pueden consultar los valores exactos, comparar cada canción con la media del disco, explorar el álbum atributo por atributo y ver en el mapa los lugares del disco.

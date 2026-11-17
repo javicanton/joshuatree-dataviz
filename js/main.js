@@ -5,59 +5,62 @@
 (async function () {
   "use strict";
 
-  // ---------- Geometría (lienzo de 1500 x 3240) ----------
-  const W = 1500, H = 3240;
-  const MOBILE_VIEW = [190, 815, 1300, 1730];        // en pantallas estrechas solo se ve el árbol
+  // ---------- Geometría (lienzo de 1500 x 3400) ----------
+  const W = 1500, H = 3400;
+  const MOBILE_VIEW = [150, 815, 1350, 1890];        // en pantallas estrechas solo se ve el árbol
   const FEATS = ["danceability", "energy", "speechiness", "acousticness", "instrumentalness", "valence"]; // en sentido horario desde arriba
   const LEGEND_ORDER = ["danceability", "valence", "energy", "speechiness", "instrumentalness", "acousticness"];
   const R_UNIT = 0.894;      // el valor 1000 queda al 89 % del eje, como en los radares originales
-  const L = 60;              // longitud del eje de cada radar
-  const RD = 66;             // radio del disco de la copa
+  const L = 54;              // longitud del eje de cada radar
+  const RD = 60;             // radio del disco de la copa
   // Medidas de cada tipo de rama y copa. La rama es la forma de onda: un núcleo de madera que adelgaza
   // de la base (C0) a la punta (C1) y, encima, la amplitud de la canción (hasta SPK a cada lado).
+  // La copa repite la onda en círculo (hasta SPIKE), como las hojas en punta del árbol de Josué.
   // Las caras B son brotes pequeños que salen de la rama de su sencillo.
   const SIZE = {
-    album: { RD, L, C0: 9, C1: 2.4, SPK: 10, label: 22 },
-    bside: { RD: 27, L: 25, C0: 4, C1: 1.2, SPK: 5, label: 17 }
+    album: { RD, L, SPIKE: 24, C0: 9, C1: 2.4, SPK: 10, label: 22 },
+    bside: { RD: 25, L: 22, SPIKE: 10, C0: 4, C1: 1.2, SPK: 5, label: 17 }
   };
   const sz = d => SIZE[d.type] || SIZE.album;
   const halfMax = S => S.C0 + S.SPK;
   const MIXED = new Set(["where-the-streets-have-no-name", "with-or-without-you", "bullet-the-blue-sky", "red-hill-mining-town"]);
 
-  // Tronco, dibujado tomando como referencia las fotos del árbol (portada, contraportada y Wikipedia, 1994):
-  // casi recto, con una ligera inclinación, la base ensanchada y pequeños abultamientos.
-  // P: curva de la base a la horquilla · base, top: semianchura abajo y arriba · flare: ensanche del pie
-  const TRUNK = { P: [[778, 2532], [792, 2310], [752, 2070], [773, 1872]], base: 52, top: 36, flare: 30 };
-  // Ramas de madera (sin datos) que salen del tronco y de las que nacen las canciones.
-  // p0: inicio (dentro del tronco) · c: final · a0, a1: ángulos de salida y llegada (0 = derecha, -90 = arriba)
-  // k: tensión de la curva · w: semianchura al principio y al final
+  // El árbol sigue la estructura del de la portada y la contraportada: un tronco alto y recto; una guía
+  // central que sube hasta la copa; un brazo largo y casi horizontal hacia la derecha, que acaba
+  // colgando; y un brazo a la izquierda que sube y luego cae. Las ramas tienen quiebros, no curvas lisas.
+  // Todos los trazados son puntos de paso unidos con una curva suave (Catmull-Rom).
+  // Tronco: base, top: semianchura abajo y arriba · flare: ensanche del pie
+  const TRUNK = { P: [[772, 2692], [778, 2420], [769, 2110], [779, 1790]], base: 50, top: 34, flare: 28 };
+  // Ramas de madera (sin datos). P: puntos de paso · w: semianchura al principio y al final
+  // from: [rama de la que nace, fracción de su longitud] cuando no sale del tronco
   const LIMBS = {
-    L: { p0: [752, 1905], c: [600, 1712], a0: -100, a1: -165, k: [0.55, 0.45], w: [32, 13] },
-    C: { p0: [774, 1890], c: [768, 1565], a0: -90, a1: -95, k: [0.4, 0.4], w: [30, 13] },
-    R: { p0: [796, 1905], c: [950, 1722], a0: -80, a1: -15, k: [0.55, 0.45], w: [32, 13] }
+    C:  { P: [[777, 1830], [786, 1680], [802, 1560], [794, 1440], [812, 1340]], w: [30, 13] },
+    R:  { P: [[788, 1812], [880, 1772], [990, 1778], [1100, 1752], [1185, 1712], [1232, 1665]], w: [28, 11] },
+    L:  { P: [[768, 1815], [706, 1744], [632, 1676], [562, 1656], [505, 1680]], w: [27, 11] },
+    UL: { from: ["C", 0.42], P: [[735, 1488], [672, 1428], [622, 1350]], w: [17, 9] }
   };
-  // Ramas de las canciones. c: centro de la copa · from: [rama de la que nace, fracción de su longitud]
+  // Ramas de las canciones. from: [rama de la que nace, fracción] · via: puntos de paso · c: centro de la copa
   // label: [x, y, alineación, anchura] del rótulo
   const LAYOUT = {
-    "bullet-the-blue-sky":            { c: [650, 935],   from: ["C", 1], a0: -92, a1: -112, k: [0.45, 0.4], label: [546, 872, "end", 300] },
-    "running-to-stand-still":         { c: [890, 950],   from: ["bullet-the-blue-sky", 0.25], a0: -55, a1: -100, k: [0.5, 0.45], label: [996, 895, "start", 300] },
-    "red-hill-mining-town":           { c: [1110, 1140], from: ["C", 0.85], a0: -62, a1: -30, k: [0.5, 0.45], label: [1216, 1095, "start", 284] },
-    "with-or-without-you":            { c: [430, 1110],  from: ["L", 1], a0: -95, a1: -120, k: [0.5, 0.45], label: [327, 1062, "end", 300] },
-    "i-still-havent-found":           { c: [345, 1445],  from: ["L", 1], a0: -170, a1: -125, k: [0.5, 0.45], label: [242, 1392, "end", 222] },
-    "where-the-streets-have-no-name": { c: [380, 1820],  from: ["L", 0.8], a0: 175, a1: 140, k: [0.5, 0.4], label: [276, 1772, "end", 250] },
-    "in-gods-country":                { c: [1035, 1425], from: ["R", 1], a0: -80, a1: -100, k: [0.45, 0.4], label: [1141, 1377, "start", 240] },
-    "trip-through-your-wires":        { c: [1340, 1570], from: ["R", 1], a0: -15, a1: -35, k: [0.5, 0.45], label: [1340, 1668, "middle", 220] },
-    "one-tree-hill":                  { c: [1340, 1880], from: ["R", 0.95], a0: 15, a1: 20, k: [0.5, 0.45], label: [1340, 1974, "middle", 220] },
-    "mothers-of-the-disappeared":     { c: [1010, 2040], from: ["R", 0.35], a0: 60, a1: 95, k: [0.5, 0.45], label: [1010, 2168, "middle", 210] },
-    "exit":                           { c: [1280, 2215], from: ["mothers-of-the-disappeared", 0.5], a0: -15, a1: 70, k: [0.5, 0.45], label: [1386, 2185, "start", 110] },
+    "bullet-the-blue-sky":            { from: ["C", 1], via: [[782, 1220], [738, 1112]], c: [700, 960], label: [596, 900, "end", 300] },
+    "running-to-stand-still":         { from: ["C", 1], via: [[868, 1236], [902, 1110]], c: [935, 960], label: [1040, 905, "start", 300] },
+    "red-hill-mining-town":           { from: ["C", 0.78], via: [[880, 1408], [978, 1338], [1060, 1262]], c: [1150, 1170], label: [1252, 1125, "start", 240] },
+    "with-or-without-you":            { from: ["UL", 1], via: [[584, 1262], [526, 1204]], c: [470, 1110], label: [366, 1062, "end", 300] },
+    "i-still-havent-found":           { from: ["L", 0.72], via: [[480, 1610], [404, 1546]], c: [330, 1440], label: [226, 1392, "end", 200] },
+    "where-the-streets-have-no-name": { from: ["L", 1], via: [[462, 1744]], c: [420, 1850], label: [316, 1800, "end", 260] },
+    "in-gods-country":                { from: ["R", 0.4], via: [[978, 1690], [1002, 1600]], c: [1010, 1490], label: [1106, 1442, "start", 190] },
+    "trip-through-your-wires":        { from: ["R", 1], via: [[1300, 1640]], c: [1390, 1580], label: [1390, 1356, "middle", 170] },
+    "one-tree-hill":                  { from: ["R", 1], via: [[1288, 1760], [1330, 1842]], c: [1352, 1940], label: [1352, 2052, "middle", 200] },
+    "mothers-of-the-disappeared":     { from: ["R", 0.55], via: [[1052, 1852], [1030, 1950]], c: [1010, 2060], label: [1010, 2172, "middle", 210] },
+    "exit":                           { from: ["R", 0.75], via: [[1150, 1860], [1192, 2050]], c: [1290, 2235], label: [1396, 2205, "start", 100] },
     // Caras B
-    "luminous-times":    { c: [590, 1135], from: ["with-or-without-you", 0.6], a0: -30, a1: -80, k: [0.5, 0.45], label: [582, 1036, "middle", 175] },
-    "walk-to-the-water": { c: [450, 1300], from: ["with-or-without-you", 0.42], a0: -160, a1: -100, k: [0.5, 0.45], label: [404, 1280, "end", 150] },
-    "spanish-eyes":      { c: [200, 1600], from: ["i-still-havent-found", 0.88], a0: 150, a1: 120, k: [0.5, 0.45], label: [158, 1588, "end", 130] },
-    "deep-in-the-heart": { c: [330, 1640], from: ["i-still-havent-found", 0.65], a0: 110, a1: 100, k: [0.5, 0.45], label: [330, 1690, "middle", 110] },
-    "silver-and-gold":   { c: [640, 1905], from: ["where-the-streets-have-no-name", 0.22], a0: 90, a1: 80, k: [0.5, 0.45], label: [640, 1955, "middle", 100] },
-    "sweetest-thing":    { c: [525, 1920], from: ["where-the-streets-have-no-name", 0.5], a0: 95, a1: 90, k: [0.5, 0.45], label: [525, 1970, "middle", 110] },
-    "race-against-time": { c: [440, 1990], from: ["where-the-streets-have-no-name", 0.6], a0: 100, a1: 80, k: [0.5, 0.45], label: [404, 1980, "end", 90] }
+    "luminous-times":    { from: ["UL", 0.8], via: [[560, 1320]], c: [486, 1294], label: [446, 1282, "end", 150] },
+    "walk-to-the-water": { from: ["UL", 0.3], via: [[680, 1500]], c: [636, 1546], label: [596, 1534, "end", 120] },
+    "spanish-eyes":      { from: ["i-still-havent-found", 0.82], via: [[260, 1540]], c: [206, 1600], label: [166, 1588, "end", 120] },
+    "deep-in-the-heart": { from: ["i-still-havent-found", 0.45], via: [[410, 1608]], c: [366, 1660], label: [366, 1706, "middle", 110] },
+    "silver-and-gold":   { from: ["where-the-streets-have-no-name", 0.3], via: [[530, 1760]], c: [582, 1806], label: [582, 1852, "middle", 100] },
+    "sweetest-thing":    { from: ["where-the-streets-have-no-name", 0.6], via: [[482, 1900]], c: [500, 2000], label: [540, 1990, "start", 100] },
+    "race-against-time": { from: ["where-the-streets-have-no-name", 0.08], via: [[602, 1730], [668, 1840]], c: [684, 1985], label: [684, 2031, "middle", 96] }
   };
   // Lugares del mapa: [longitud, latitud, canción asociada]
   const PLACES = {
@@ -65,7 +68,7 @@
     ethiopia: [39.5, 9.0, "where-the-streets-have-no-name"], elsalvador: [-88.9, 13.7, "bullet-the-blue-sky"],
     buenosaires: [-58.38, -34.6, "mothers-of-the-disappeared"], auckland: [174.76, -36.85, "one-tree-hill"]
   };
-  const LEGEND_C = [228, 2150], LEGEND_L = 78;
+  const LEGEND_C = [228, 2310], LEGEND_L = 78;
 
   // ---------- Carga ----------
   const [data, texts, art, titleSvg] = await Promise.all([
@@ -103,24 +106,27 @@
 
   // ---------- Geometría de las ramas ----------
   const rad = a => a * Math.PI / 180;
-  // Muestrea una Bézier cúbica a pasos iguales de longitud: devuelve n puntos con su normal
-  function sampleBezier(P, n, cut) {
-    const M = 800, raw = [];
-    for (let i = 0; i <= M; i++) {
-      const t = i / M, u = 1 - t;
-      raw.push([
-        u * u * u * P[0][0] + 3 * u * u * t * P[1][0] + 3 * u * t * t * P[2][0] + t * t * t * P[3][0],
-        u * u * u * P[0][1] + 3 * u * u * t * P[1][1] + 3 * u * t * t * P[2][1] + t * t * t * P[3][1]
-      ]);
+  // Muestrea una curva Catmull-Rom que pasa por los puntos P, a pasos iguales de longitud:
+  // devuelve n puntos con su normal. cut recorta ese tramo al final (para no entrar en la copa).
+  function samplePath(P, n, cut) {
+    const raw = [], E = (i) => P[Math.max(0, Math.min(P.length - 1, i))];
+    for (let i = 0; i < P.length - 1; i++) {
+      const p0 = i === 0 ? [2 * P[0][0] - P[1][0], 2 * P[0][1] - P[1][1]] : E(i - 1), p1 = E(i), p2 = E(i + 1);
+      const p3 = i + 2 < P.length ? E(i + 2) : [2 * p2[0] - p1[0], 2 * p2[1] - p1[1]];
+      for (let k = 0; k < 60; k++) {
+        const t = k / 60, t2 = t * t, t3 = t2 * t;
+        raw.push([0, 1].map(j => 0.5 * (2 * p1[j] + (-p0[j] + p2[j]) * t + (2 * p0[j] - 5 * p1[j] + 4 * p2[j] - p3[j]) * t2 + (-p0[j] + 3 * p1[j] - 3 * p2[j] + p3[j]) * t3)));
+      }
     }
-    const acc = [0];
+    raw.push(P[P.length - 1].slice());
+    const M = raw.length - 1, acc = [0];
     for (let i = 1; i <= M; i++) acc.push(acc[i - 1] + Math.hypot(raw[i][0] - raw[i - 1][0], raw[i][1] - raw[i - 1][1]));
     const len = acc[M] - (cut || 0), out = [];
     let j = 0;
     for (let i = 0; i < n; i++) {
-      const s = len * i / (n - 1);
-      while (j < M - 1 && acc[j + 1] < s) j++;
-      const f = (s - acc[j]) / ((acc[j + 1] - acc[j]) || 1);
+      const sl = len * i / (n - 1);
+      while (j < M - 1 && acc[j + 1] < sl) j++;
+      const f = (sl - acc[j]) / ((acc[j + 1] - acc[j]) || 1);
       const x = raw[j][0] + f * (raw[j + 1][0] - raw[j][0]), y = raw[j][1] + f * (raw[j + 1][1] - raw[j][1]);
       const dx = raw[j + 1][0] - raw[j][0], dy = raw[j + 1][1] - raw[j][1], d = Math.hypot(dx, dy) || 1;
       out.push({ x, y, nx: -dy / d, ny: dx / d });
@@ -155,24 +161,18 @@
   const AMP = new URLSearchParams(location.search).get('amp') || 'peaks';
   const amp = t => (AMP === 'peaks' ? t.peaks : t.rms);
 
-  // Ramas: cada una nace de una rama de madera o de la rama de otra canción
+  // Ramas: las de madera salen del tronco o de otra; las de las canciones, de una rama de madera o de otra canción
   const G = {};
-  const bezier = (p0, lay, cut) => {
-    const d = Math.hypot(lay.c[0] - p0[0], lay.c[1] - p0[1]);
-    const P = [p0,
-      [p0[0] + Math.cos(rad(lay.a0)) * d * lay.k[0], p0[1] + Math.sin(rad(lay.a0)) * d * lay.k[0]],
-      [lay.c[0] - Math.cos(rad(lay.a1)) * d * lay.k[1], lay.c[1] - Math.sin(rad(lay.a1)) * d * lay.k[1]],
-      lay.c];
-    return sampleBezier(P, 200, cut);
-  };
+  const pointOn = (id, f) => { const pp = G[id].pts; const q = pp[Math.round(f * (pp.length - 1))]; return [q.x, q.y]; };
   Object.entries(LIMBS).forEach(([k, lay]) => {
-    const pts = bezier(lay.p0, lay, 0);
-    G[k] = { pts, w: pts.map((p, i) => lay.w[0] + (lay.w[1] - lay.w[0]) * Math.pow(i / (pts.length - 1), 0.8)) };
+    const P = lay.from ? [pointOn(lay.from[0], lay.from[1]), ...lay.P] : lay.P;
+    const pts = samplePath(P, 200, 0);
+    G[k] = { pts, w: pts.map((p, i) => lay.w[0] + (lay.w[1] - lay.w[0]) * Math.pow(i / (pts.length - 1), 0.8)), origin: P[0] };
   });
   // Generador pseudoaleatorio con semilla: la corteza sale siempre igual
   const rng = seed => () => (seed = (seed * 16807) % 2147483647) / 2147483647;
   const trunk = (() => {
-    const pts = sampleBezier(TRUNK.P, 300, 0), n = pts.length - 1;
+    const pts = samplePath(TRUNK.P, 300, 0), n = pts.length - 1;
     const base = i => { const t = i / n; return TRUNK.base + (TRUNK.top - TRUNK.base) * t + TRUNK.flare * Math.exp(-t * 11) + 2.5 * Math.sin(t * 19); };
     return {
       pts,
@@ -201,23 +201,29 @@
     }
     return d;
   }
-  const pointOn = (id, f) => { const pp = G[id].pts; const q = pp[Math.round(f * (pp.length - 1))]; return [q.x, q.y]; };
   function buildBranch(id) {
     if (G[id] && G[id].pts) return;
     const lay = LAYOUT[id], parent = lay.from[0];
     if (!LIMBS[parent]) buildBranch(parent);
     const p0 = pointOn(parent, lay.from[1]);
     const t = byId.get(id), n = t.peaks.length, S = sz(t);
-    const dd = Math.hypot(lay.c[0] - p0[0], lay.c[1] - p0[1]);
-    const P = [p0,
-      [p0[0] + Math.cos(rad(lay.a0)) * dd * lay.k[0], p0[1] + Math.sin(rad(lay.a0)) * dd * lay.k[0]],
-      [lay.c[0] - Math.cos(rad(lay.a1)) * dd * lay.k[1], lay.c[1] - Math.sin(rad(lay.a1)) * dd * lay.k[1]],
-      lay.c];
-    const pts = sampleBezier(P, n, S.RD - 2);
+    const pts = samplePath([p0, ...(lay.via || []), lay.c], n, S.RD - 2);
     const core = pts.map((p, i) => S.C0 + (S.C1 - S.C0) * Math.pow(i / (n - 1), 0.7));
     G[id] = { pts, core, w: amp(t).map((a, i) => core[i] + a * S.SPK), origin: p0 };
   }
   all.forEach(t => buildBranch(t.id));
+  // Copa: la misma onda, en círculo y en sentido horario desde arriba
+  function crownPath(t, i0, i1, closeInner) {
+    const n = t.peaks.length, pts = [], { RD, SPIKE } = sz(t);
+    for (let i = i0; i <= i1; i++) {
+      const a = 2 * Math.PI * i / n, r = RD + 1 + amp(t)[i] * SPIKE;
+      pts.push(`${(Math.sin(a) * r).toFixed(1)},${(-Math.cos(a) * r).toFixed(1)}`);
+    }
+    if (!closeInner) return "M" + pts.join("L") + "Z";
+    const a0 = 2 * Math.PI * i0 / n, a1 = 2 * Math.PI * i1 / n;
+    return "M" + pts.join("L") + `L${(Math.sin(a1) * RD).toFixed(1)},${(-Math.cos(a1) * RD).toFixed(1)}` +
+      `A${RD},${RD} 0 ${a1 - a0 > Math.PI ? 1 : 0} 0 ${(Math.sin(a0) * RD).toFixed(1)},${(-Math.cos(a0) * RD).toFixed(1)}Z`;
+  }
   // Contorno relleno de una rama de grosor variable (núcleo de madera)
   function solid(pts, widths) {
     const a = [], b = [];
@@ -235,7 +241,7 @@
     all.forEach(t => {
       const g = G[t.id], S = sz(t);
       g.pts.forEach((p, i) => { if (i % 6 === 0) items.push({ id: t.id, kind: "rama", x: p.x, y: p.y, r: g.w[i] }); });
-      circ(t.id, LAYOUT[t.id].c[0], LAYOUT[t.id].c[1], S.RD + 4);
+      circ(t.id, LAYOUT[t.id].c[0], LAYOUT[t.id].c[1], S.RD + S.SPIKE * 0.8);
     });
     const parentOf = id => (LAYOUT[id] ? LAYOUT[id].from[0] : null);
     const related = (a, b) => a === b || parentOf(a) === b || parentOf(b) === a || (parentOf(a) && parentOf(a) === parentOf(b) && LIMBS[parentOf(a)]);
@@ -340,7 +346,7 @@
       root.append("rect").attr("class", "rule").attr("x", 0).attr("y", 190).attr("width", W).attr("height", 8);
       root.append("image").attr("href", "assets/cover.jpg").attr("x", 0).attr("y", 198).attr("width", W).attr("height", 589).attr("preserveAspectRatio", "xMidYMid slice");
       root.append("rect").attr("class", "rule").attr("x", 0).attr("y", 787).attr("width", W).attr("height", 8);
-      root.append("rect").attr("class", "rule").attr("x", 0).attr("y", 2528).attr("width", W).attr("height", 8);
+      root.append("rect").attr("class", "rule").attr("x", 0).attr("y", 2688).attr("width", W).attr("height", 8);
       // Datos generales del álbum
       const stats = root.append("text").attr("class", "stats").attr("x", 40).attr("y", 868)
         .attr("tabindex", 0).attr("role", "button").attr("aria-label", `${data.album.title}. ${t.album}`)
@@ -355,7 +361,8 @@
     wood.append("path").attr("class", "bark").attr("d", bark(trunk.pts, trunk.wl, trunk.wr, 3.6, 9, 5));
     Object.entries(LIMBS).forEach(([k, lay], j) => {
       wood.append("path").attr("class", "limb").attr("d", solid(G[k].pts, G[k].w));
-      wood.append("circle").attr("class", "limb").attr("cx", lay.c[0]).attr("cy", lay.c[1]).attr("r", lay.w[1]);
+      const tip = G[k].pts[G[k].pts.length - 1];
+      wood.append("circle").attr("class", "limb").attr("cx", tip.x).attr("cy", tip.y).attr("r", lay.w[1]);
       wood.append("path").attr("class", "bark").attr("d", bark(G[k].pts, G[k].w, G[k].w, 3.4, 6, 11 + j));
     });
     // Ramas de las canciones: primero los brotes de las caras B, luego las ramas del disco
@@ -366,7 +373,7 @@
     // Una copa interactiva por canción
     const layer = root.append("g").attr("class", "tracks");
     all.forEach(d => {
-      const id = d.id, lay = LAYOUT[id], { RD, L } = sz(d), isB = d.type === "bside", SPIKE = isB ? 6 : 12;
+      const id = d.id, lay = LAYOUT[id], { RD, L, SPIKE } = sz(d), isB = d.type === "bside";
       const g = layer.append("g")
         .attr("class", "track" + (isB ? " bside" : "")).attr("data-id", id)
         .attr("tabindex", 0).attr("role", "button")
@@ -375,9 +382,10 @@
         .on("keydown", ev => { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); activate(id); } });
 
       const r = g.append("g").attr("transform", `translate(${lay.c})`);
-      r.append("circle").attr("class", "disc").attr("r", RD);
+      r.append("path").attr("class", "crown").attr("d", crownPath(d, 0, d.peaks.length - 1));
       r.append("path").attr("class", "crown-prog");
-      r.append("circle").attr("class", "halo").attr("r", RD + 6);
+      r.append("circle").attr("class", "disc").attr("r", RD);
+      r.append("circle").attr("class", "halo").attr("r", RD + SPIKE + 5);
       drawRadar(r, L, d.features);
       r.append("path").attr("class", "mean").attr("d", radarPath(data.album.features_mean, L));
       const dot = r.append("circle").attr("class", "vdot").attr("r", 3.4).style("display", "none");
@@ -494,7 +502,7 @@
     const f = state.explore;
     svg.classed("show-mean", state.compare).classed("exploring", !!f);
     const dim = (id, v) => {
-      svg.selectAll(`.track[data-id="${id}"] .disc`).style("fill-opacity", v);
+      svg.selectAll(`.track[data-id="${id}"] .crown, .track[data-id="${id}"] .disc`).style("fill-opacity", v);
       svg.selectAll(`.wave[data-id="${id}"] .wood, .wave[data-id="${id}"] .core`).style("opacity", v);
     };
     if (!f) { all.forEach(d => dim(d.id, null)); return; }
@@ -530,7 +538,7 @@
     });
     g.append("text").attr("class", "lg-caption").attr("x", cx).attr("y", cy + len + 78).text(t.meanCaption);
     // clave de lectura de los rótulos y de la metáfora
-    const kx = 372, ky = 2075;
+    const kx = 372, ky = 2235;
     const key = g.append("text").attr("class", "key").attr("x", kx).attr("y", ky);
     key.append("tspan").text(t.key.n + " ");
     key.append("tspan").text(t.key.song.toUpperCase());
@@ -554,7 +562,7 @@
     return `<span class="tip-title">${city} · ${what}</span>${text}`;
   }
   function drawCredits(root, t) {
-    const g = root.append("g").attr("class", "credits").attr("transform", "translate(0,120)");
+    const g = root.append("g").attr("class", "credits").attr("transform", "translate(0,280)");
     const top = g.append("text").attr("class", "cr-top").attr("x", 750).attr("y", 2466);
     [t.band, t.members, ...t.creditsTop].forEach((l, i) => top.append("tspan").attr("x", 750).attr("dy", i ? 36 : 0).text(l));
     // mapa de los lugares del disco
@@ -843,8 +851,9 @@
       }
     });
     svg.selectAll(".crown-prog").each(function () {
-      const id = this.parentNode.parentNode.dataset.id, on = !!cur && id === cur.id, R = sz(byId.get(id)).RD;
-      d3.select(this).attr("d", on && frac > 0 ? d3.arc()({ innerRadius: R + 1.5, outerRadius: R + 6, startAngle: 0, endAngle: 2 * Math.PI * frac }) : null);
+      const id = this.parentNode.parentNode.dataset.id, on = !!cur && id === cur.id;
+      const d = byId.get(id), k = Math.round(frac * (d.peaks.length - 1));
+      d3.select(this).attr("d", on && k > 0 ? crownPath(d, 0, k, true) : null);
     });
     d3.select("#now-time").text(cur && player.dur ? `${mmss(pos)} / ${mmss(player.dur)}` : "");
   }
@@ -912,7 +921,7 @@
 
   // Las medidas de texto dependen de la fuente: se espera a que esté lista
   if (document.fonts && document.fonts.load) {
-    try { await Promise.all(["300 italic 20px 'JT Garamond Narrow'", "400 20px 'JT Garamond Narrow'", "300 20px 'JT Garamond'", "400 20px 'JT Garamond'"].map(f => document.fonts.load(f))); } catch (e) { /* seguimos */ }
+    try { await Promise.all(["300 20px 'JT Garamond Narrow'", "400 20px 'JT Garamond Narrow'", "300 20px 'JT Garamond'", "400 20px 'JT Garamond'"].map(f => document.fonts.load(f))); } catch (e) { /* seguimos */ }
   }
   render();
   const hash = decodeURIComponent(location.hash.slice(1));

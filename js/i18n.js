@@ -48,7 +48,7 @@ window.I18N = {
       acousticness: ["acústica", "Acústica", "mide si la pista es acústica."]
     },
     key: { n: "Nº", song: "Canción", lines: ["Duración", "Tempo", "Tono", "(Fecha de lanzamiento", "como single)"] },
-    howto: ["Cada rama es la forma de onda", "de una canción, de la base a la copa.", "La copa repite la onda en círculo", "y encierra su gráfico de radar.", "Las copas pequeñas son las caras B,", "brotes de la rama de su sencillo."],
+    howto: ["Cada rama es la forma de onda", "de una canción, de la base a la copa,", "y la copa, su gráfico de radar.", "Las copas pequeñas son las caras B,", "brotes de la rama de su sencillo."],
     stats: ["9 Marzo 1987", "Duración total: 50:11", "+25.000.000 copias vendidas"],
     scopes: { na: "solo Norteamérica", anz: "solo Australia y N. Zelanda" },
     mixedNote: "* Mezclada por Steve Lillywhite",
@@ -140,7 +140,7 @@ window.I18N = {
       acousticness: ["acousticness", "Acousticness", "measures whether the track is acoustic."]
     },
     key: { n: "Nº", song: "Song", lines: ["Duration", "Tempo", "Key", "(Release date as single)"] },
-    howto: ["Each branch is the waveform", "of a song, from base to crown.", "The crown repeats the wave in a circle", "and holds its radar chart.", "The small crowns are the B-sides,", "sprouting from their single's branch."],
+    howto: ["Each branch is the waveform", "of a song, from base to crown,", "and the crown is its radar chart.", "The small crowns are the B-sides,", "sprouting from their single's branch."],
     stats: ["9 March 1987", "Total duration: 50:11", "+25,000,000 copies sold"],
     scopes: { na: "North America only", anz: "Australia and N. Zealand only" },
     mixedNote: "* Mixed by Steve Lillywhite",

@@ -5,51 +5,55 @@
 (async function () {
   "use strict";
 
-  // ---------- Geometría (lienzo de 1500 x 3120) ----------
-  const W = 1500, H = 3120;
-  const MOBILE_VIEW = [190, 815, 1300, 1600];        // en pantallas estrechas solo se ve el árbol
+  // ---------- Geometría (lienzo de 1500 x 3240) ----------
+  const W = 1500, H = 3240;
+  const MOBILE_VIEW = [190, 815, 1300, 1730];        // en pantallas estrechas solo se ve el árbol
   const FEATS = ["danceability", "energy", "speechiness", "acousticness", "instrumentalness", "valence"]; // en sentido horario desde arriba
   const LEGEND_ORDER = ["danceability", "valence", "energy", "speechiness", "instrumentalness", "acousticness"];
   const R_UNIT = 0.894;      // el valor 1000 queda al 89 % del eje, como en los radares originales
   const L = 60;              // longitud del eje de cada radar
   const RD = 66;             // radio del disco de la copa
-  const SPIKE = 26;          // altura máxima de la onda alrededor de la copa
-  const HALF = 15;           // semianchura máxima de una rama
-  const CORE = 3;            // semianchura mínima: la rama no se corta en los silencios
-  const TRUNK_HALF = 27;
-  // Medidas de cada tipo de copa: las caras B son brotes pequeños de la rama de su sencillo
+  // Medidas de cada tipo de rama y copa. La rama es la forma de onda: un núcleo de madera que adelgaza
+  // de la base (C0) a la punta (C1) y, encima, la amplitud de la canción (hasta SPK a cada lado).
+  // Las caras B son brotes pequeños que salen de la rama de su sencillo.
   const SIZE = {
-    album: { RD, SPIKE, HALF, CORE, L, label: 22 },
-    bside: { RD: 27, SPIKE: 11, HALF: 6.5, CORE: 1.6, L: 25, label: 17 }
+    album: { RD, L, C0: 9, C1: 2.4, SPK: 10, label: 22 },
+    bside: { RD: 27, L: 25, C0: 4, C1: 1.2, SPK: 5, label: 17 }
   };
   const sz = d => SIZE[d.type] || SIZE.album;
+  const halfMax = S => S.C0 + S.SPK;
   const MIXED = new Set(["where-the-streets-have-no-name", "with-or-without-you", "bullet-the-blue-sky", "red-hill-mining-town"]);
 
-  // Tronco: curva de Bézier de la raíz a la horquilla
-  const TRUNK = [[772, 2404], [782, 2210], [758, 1990], [770, 1800]];
-  // c: centro de la copa · from: de dónde nace la rama (el tronco o [rama madre, fracción de su longitud])
-  // a0, a1: ángulos de salida y de llegada en grados (0 = derecha, -90 = arriba) · k: tensión de la curva
+  // Ramas de madera (sin datos) que salen del tronco y de las que nacen las canciones.
+  // p0: inicio (dentro del tronco) · c: final · a0, a1: ángulos de salida y llegada (0 = derecha, -90 = arriba)
+  // k: tensión de la curva · w: semianchura al principio y al final
+  const LIMBS = {
+    L: { p0: [748, 1900], c: [600, 1712], a0: -100, a1: -165, k: [0.55, 0.45], w: [30, 13] },
+    C: { p0: [774, 1890], c: [768, 1565], a0: -90, a1: -95, k: [0.4, 0.4], w: [30, 13] },
+    R: { p0: [800, 1900], c: [950, 1722], a0: -80, a1: -15, k: [0.55, 0.45], w: [30, 13] }
+  };
+  // Ramas de las canciones. c: centro de la copa · from: [rama de la que nace, fracción de su longitud]
   // label: [x, y, alineación, anchura] del rótulo
   const LAYOUT = {
-    "bullet-the-blue-sky":            { c: [650, 935],   from: "trunk", a0: -88, a1: -105, k: [0.42, 0.3], label: [546, 872, "end", 300] },
-    "where-the-streets-have-no-name": { c: [395, 1800],  from: ["i-still-havent-found", 0.36], a0: 165, a1: 115, k: [0.4, 0.4], label: [292, 1752, "end", 262] },
-    "i-still-havent-found":           { c: [345, 1445],  from: ["bullet-the-blue-sky", 0.1], a0: -165, a1: -150, k: [0.45, 0.35], label: [242, 1392, "end", 222] },
-    "with-or-without-you":            { c: [430, 1110],  from: ["bullet-the-blue-sky", 0.3], a0: -150, a1: -125, k: [0.4, 0.4], label: [327, 1062, "end", 300] },
-    "running-to-stand-still":         { c: [890, 950],   from: ["bullet-the-blue-sky", 0.62], a0: -60, a1: -80, k: [0.4, 0.35], label: [996, 895, "start", 300] },
-    "red-hill-mining-town":           { c: [1100, 1130], from: ["bullet-the-blue-sky", 0.45], a0: -42, a1: -50, k: [0.4, 0.4], label: [1206, 1085, "start", 285] },
-    "trip-through-your-wires":        { c: [1340, 1570], from: "trunk", a0: -6, a1: -48, k: [0.5, 0.35], label: [1238, 1552, "end", 190] },
-    "in-gods-country":                { c: [1035, 1425], from: ["trip-through-your-wires", 0.3], a0: -75, a1: -85, k: [0.4, 0.4], label: [1141, 1377, "start", 240] },
-    "one-tree-hill":                  { c: [1340, 1880], from: ["trip-through-your-wires", 0.62], a0: 40, a1: 45, k: [0.4, 0.4], label: [1292, 1693, "start", 200] },
-    "exit":                           { c: [1280, 2215], from: ["one-tree-hill", 0.4], a0: 100, a1: 55, k: [0.4, 0.4], label: [1386, 2185, "start", 110] },
-    "mothers-of-the-disappeared":     { c: [1000, 2030], from: ["trip-through-your-wires", 0.2], a0: 60, a1: 78, k: [0.4, 0.4], label: [1000, 2158, "middle", 210] },
+    "bullet-the-blue-sky":            { c: [650, 935],   from: ["C", 1], a0: -92, a1: -112, k: [0.45, 0.4], label: [546, 872, "end", 300] },
+    "running-to-stand-still":         { c: [890, 950],   from: ["bullet-the-blue-sky", 0.25], a0: -55, a1: -100, k: [0.5, 0.45], label: [996, 895, "start", 300] },
+    "red-hill-mining-town":           { c: [1110, 1140], from: ["C", 0.85], a0: -62, a1: -30, k: [0.5, 0.45], label: [1216, 1095, "start", 284] },
+    "with-or-without-you":            { c: [430, 1110],  from: ["L", 1], a0: -95, a1: -120, k: [0.5, 0.45], label: [327, 1062, "end", 300] },
+    "i-still-havent-found":           { c: [345, 1445],  from: ["L", 1], a0: -170, a1: -125, k: [0.5, 0.45], label: [242, 1392, "end", 222] },
+    "where-the-streets-have-no-name": { c: [380, 1820],  from: ["L", 0.8], a0: 175, a1: 140, k: [0.5, 0.4], label: [276, 1772, "end", 250] },
+    "in-gods-country":                { c: [1035, 1425], from: ["R", 1], a0: -80, a1: -100, k: [0.45, 0.4], label: [1141, 1377, "start", 240] },
+    "trip-through-your-wires":        { c: [1340, 1570], from: ["R", 1], a0: -15, a1: -35, k: [0.5, 0.45], label: [1340, 1668, "middle", 220] },
+    "one-tree-hill":                  { c: [1340, 1880], from: ["R", 0.95], a0: 15, a1: 20, k: [0.5, 0.45], label: [1340, 1974, "middle", 220] },
+    "mothers-of-the-disappeared":     { c: [1010, 2040], from: ["R", 0.35], a0: 60, a1: 95, k: [0.5, 0.45], label: [1010, 2168, "middle", 210] },
+    "exit":                           { c: [1280, 2215], from: ["mothers-of-the-disappeared", 0.5], a0: -15, a1: 70, k: [0.5, 0.45], label: [1386, 2185, "start", 110] },
     // Caras B
-    "luminous-times":    { c: [590, 1135], from: ["with-or-without-you", 0.72], a0: -20, a1: -70, k: [0.4, 0.4], label: [582, 1046, "middle", 150] },
-    "walk-to-the-water": { c: [430, 1290], from: ["with-or-without-you", 0.5], a0: 200, a1: 160, k: [0.4, 0.4], label: [384, 1270, "end", 150] },
-    "spanish-eyes":      { c: [255, 1625], from: ["i-still-havent-found", 0.82], a0: 150, a1: 120, k: [0.4, 0.4], label: [210, 1612, "end", 150] },
-    "deep-in-the-heart": { c: [508, 1642], from: ["i-still-havent-found", 0.5], a0: 100, a1: 75, k: [0.4, 0.4], label: [462, 1622, "end", 100] },
-    "silver-and-gold":   { c: [610, 1790], from: ["where-the-streets-have-no-name", 0.3], a0: 60, a1: 40, k: [0.4, 0.4], label: [652, 1752, "start", 92] },
-    "sweetest-thing":    { c: [545, 1900], from: ["where-the-streets-have-no-name", 0.55], a0: 70, a1: 70, k: [0.4, 0.4], label: [500, 1888, "end", 100] },
-    "race-against-time": { c: [690, 1965], from: ["silver-and-gold", 0.45], a0: 70, a1: 50, k: [0.4, 0.4], label: [690, 2024, "middle", 100] }
+    "luminous-times":    { c: [590, 1135], from: ["with-or-without-you", 0.6], a0: -30, a1: -80, k: [0.5, 0.45], label: [582, 1036, "middle", 175] },
+    "walk-to-the-water": { c: [450, 1300], from: ["with-or-without-you", 0.42], a0: -160, a1: -100, k: [0.5, 0.45], label: [404, 1280, "end", 150] },
+    "spanish-eyes":      { c: [200, 1600], from: ["i-still-havent-found", 0.88], a0: 150, a1: 120, k: [0.5, 0.45], label: [158, 1588, "end", 130] },
+    "deep-in-the-heart": { c: [330, 1640], from: ["i-still-havent-found", 0.65], a0: 110, a1: 100, k: [0.5, 0.45], label: [330, 1690, "middle", 110] },
+    "silver-and-gold":   { c: [640, 1905], from: ["where-the-streets-have-no-name", 0.22], a0: 90, a1: 80, k: [0.5, 0.45], label: [640, 1955, "middle", 100] },
+    "sweetest-thing":    { c: [525, 1920], from: ["where-the-streets-have-no-name", 0.5], a0: 95, a1: 90, k: [0.5, 0.45], label: [525, 1970, "middle", 110] },
+    "race-against-time": { c: [440, 1990], from: ["where-the-streets-have-no-name", 0.6], a0: 100, a1: 80, k: [0.5, 0.45], label: [404, 1980, "end", 90] }
   };
   // Lugares del mapa: [longitud, latitud, canción asociada]
   const PLACES = {
@@ -57,14 +61,16 @@
     ethiopia: [39.5, 9.0, "where-the-streets-have-no-name"], elsalvador: [-88.9, 13.7, "bullet-the-blue-sky"],
     buenosaires: [-58.38, -34.6, "mothers-of-the-disappeared"], auckland: [174.76, -36.85, "one-tree-hill"]
   };
-  const LEGEND_C = [205, 2020], LEGEND_L = 82;
+  const LEGEND_C = [228, 2150], LEGEND_L = 78;
 
   // ---------- Carga ----------
-  const [data, texts, art] = await Promise.all([
+  const [data, texts, art, trunkSvg] = await Promise.all([
     d3.json("data/joshua-tree.json"),
     d3.json("data/texts.json"),
-    d3.xml("assets/art.svg")
+    d3.xml("assets/art.svg"),
+    d3.xml("assets/trunk.svg")
   ]);
+  const trunkNode = document.importNode(trunkSvg.querySelector("#trunk-path"), true);
   const all = data.tracks;                                  // las 11 del disco y las 7 caras B
   const tracks = all.filter(t => t.type === "album");
   const bsides = all.filter(t => t.type === "bside");
@@ -146,49 +152,75 @@
   const AMP = new URLSearchParams(location.search).get('amp') || 'peaks';
   const amp = t => (AMP === 'peaks' ? t.peaks : t.rms);
 
-  // El tronco es el disco entero: un tramo por canción, de la raíz a la horquilla, proporcional a su duración
+  // Ramas: cada una nace de una rama de madera o de la rama de otra canción
   const G = {};
-  const trunkPts = sampleBezier(TRUNK, 900);
-  const totalMs = d3.sum(tracks, t => t.duration_ms);
-  let accMs = 0;
-  tracks.forEach(t => {
-    const i0 = Math.round(accMs / totalMs * 899), i1 = Math.round((accMs + t.duration_ms) / totalMs * 899) - 2;
-    accMs += t.duration_ms;
-    const pts = trunkPts.slice(i0, i1 + 1), pk = resample(amp(t), pts.length);
-    pts.len = trunkPts.len * (pts.length - 1) / 899;
-    G[t.id] = { trunk: { pts, w: pk.map(p => 9 + p * (TRUNK_HALF - 9)) } };
-  });
-  // Ramas: cada una nace del tronco o de un punto de otra rama
-  const origins = {};
-  function buildBranch(id) {
-    if (G[id].pts) return;
-    const lay = LAYOUT[id];
-    let p0;
-    if (lay.from === "trunk") p0 = TRUNK[3];
-    else { buildBranch(lay.from[0]); const pp = G[lay.from[0]].pts; const q = pp[Math.round(lay.from[1] * (pp.length - 1))]; p0 = [q.x, q.y]; }
+  const bezier = (p0, lay, cut) => {
     const d = Math.hypot(lay.c[0] - p0[0], lay.c[1] - p0[1]);
     const P = [p0,
       [p0[0] + Math.cos(rad(lay.a0)) * d * lay.k[0], p0[1] + Math.sin(rad(lay.a0)) * d * lay.k[0]],
       [lay.c[0] - Math.cos(rad(lay.a1)) * d * lay.k[1], lay.c[1] - Math.sin(rad(lay.a1)) * d * lay.k[1]],
       lay.c];
+    return sampleBezier(P, 200, cut);
+  };
+  Object.entries(LIMBS).forEach(([k, lay]) => {
+    const pts = bezier(lay.p0, lay, 0);
+    G[k] = { pts, w: pts.map((p, i) => lay.w[0] + (lay.w[1] - lay.w[0]) * Math.pow(i / (pts.length - 1), 0.8)) };
+  });
+  const pointOn = (id, f) => { const pp = G[id].pts; const q = pp[Math.round(f * (pp.length - 1))]; return [q.x, q.y]; };
+  function buildBranch(id) {
+    if (G[id] && G[id].pts) return;
+    const lay = LAYOUT[id], parent = lay.from[0];
+    if (!LIMBS[parent]) buildBranch(parent);
+    const p0 = pointOn(parent, lay.from[1]);
     const t = byId.get(id), n = t.peaks.length, S = sz(t);
-    G[id].pts = sampleBezier(P, n, S.RD - 3);
-    G[id].w = amp(t).map(p => S.CORE + p * (S.HALF - S.CORE));
-    origins[id] = p0;
+    const dd = Math.hypot(lay.c[0] - p0[0], lay.c[1] - p0[1]);
+    const P = [p0,
+      [p0[0] + Math.cos(rad(lay.a0)) * dd * lay.k[0], p0[1] + Math.sin(rad(lay.a0)) * dd * lay.k[0]],
+      [lay.c[0] - Math.cos(rad(lay.a1)) * dd * lay.k[1], lay.c[1] - Math.sin(rad(lay.a1)) * dd * lay.k[1]],
+      lay.c];
+    const pts = sampleBezier(P, n, S.RD - 2);
+    const core = pts.map((p, i) => S.C0 + (S.C1 - S.C0) * Math.pow(i / (n - 1), 0.7));
+    G[id] = { pts, core, w: amp(t).map((a, i) => core[i] + a * S.SPK), origin: p0 };
   }
-  all.forEach(t => { G[t.id] = G[t.id] || {}; });
   all.forEach(t => buildBranch(t.id));
-  // Copa: la misma onda, en círculo y en sentido horario desde arriba
-  function crownPath(t, i0, i1, closeInner) {
-    const n = t.peaks.length, pts = [], { RD, SPIKE } = sz(t);
-    for (let i = i0; i <= i1; i++) {
-      const a = 2 * Math.PI * i / n, r = RD + 1 + amp(t)[i] * SPIKE;
-      pts.push(`${(Math.sin(a) * r).toFixed(1)},${(-Math.cos(a) * r).toFixed(1)}`);
+  // Contorno relleno de una rama de grosor variable (núcleo de madera)
+  function solid(pts, widths) {
+    const a = [], b = [];
+    pts.forEach((p, i) => {
+      a.push(`${(p.x + p.nx * widths[i]).toFixed(1)},${(p.y + p.ny * widths[i]).toFixed(1)}`);
+      b.push(`${(p.x - p.nx * widths[i]).toFixed(1)},${(p.y - p.ny * widths[i]).toFixed(1)}`);
+    });
+    return "M" + a.join("L") + "L" + b.reverse().join("L") + "Z";
+  }
+
+  // Comprobación de solapamientos (solo con ?debug): ramas, copas y rótulos que se tocan
+  function checkOverlaps() {
+    const items = [];
+    const circ = (id, x, y, r) => items.push({ id, kind: "copa", x, y, r });
+    all.forEach(t => {
+      const g = G[t.id], S = sz(t);
+      g.pts.forEach((p, i) => { if (i % 6 === 0) items.push({ id: t.id, kind: "rama", x: p.x, y: p.y, r: g.w[i] }); });
+      circ(t.id, LAYOUT[t.id].c[0], LAYOUT[t.id].c[1], S.RD + 4);
+    });
+    const parentOf = id => (LAYOUT[id] ? LAYOUT[id].from[0] : null);
+    const related = (a, b) => a === b || parentOf(a) === b || parentOf(b) === a || (parentOf(a) && parentOf(a) === parentOf(b) && LIMBS[parentOf(a)]);
+    const near = (a, b) => Math.hypot(a.x - G[a.id].origin[0], a.y - G[a.id].origin[1]) < 60 || Math.hypot(b.x - G[b.id].origin[0], b.y - G[b.id].origin[1]) < 60;
+    const hits = new Set();
+    for (let i = 0; i < items.length; i++) for (let j = i + 1; j < items.length; j++) {
+      const a = items[i], b = items[j];
+      if (a.id === b.id) continue;
+      if (related(a.id, b.id) && a.kind === "rama" && b.kind === "rama" && near(a, b)) continue;
+      if (Math.hypot(a.x - b.x, a.y - b.y) < a.r + b.r + 3) hits.add([a.id, a.kind, b.id, b.kind].join(" / "));
     }
-    if (!closeInner) return "M" + pts.join("L") + "Z";
-    const a0 = 2 * Math.PI * i0 / n, a1 = 2 * Math.PI * i1 / n;
-    return "M" + pts.join("L") + `L${(Math.sin(a1) * RD).toFixed(1)},${(-Math.cos(a1) * RD).toFixed(1)}` +
-      `A${RD},${RD} 0 ${a1 - a0 > Math.PI ? 1 : 0} 0 ${(Math.sin(a0) * RD).toFixed(1)},${(-Math.cos(a0) * RD).toFixed(1)}Z`;
+    // rótulos: cajas contra copas y ramas
+    svg.selectAll(".t-title, .t-meta").each(function () {
+      const bb = this.getBBox(), id = this.parentNode.dataset.id;
+      items.forEach(o => {
+        const cx = Math.max(bb.x, Math.min(o.x, bb.x + bb.width)), cy = Math.max(bb.y, Math.min(o.y, bb.y + bb.height));
+        if (Math.hypot(cx - o.x, cy - o.y) < o.r + 2 && !(o.id === id && o.kind === "copa")) hits.add(`rótulo ${id} / ${o.id} ${o.kind}`);
+      });
+    });
+    return [...hits];
   }
 
   // ---------- Etiqueta flotante ----------
@@ -271,7 +303,7 @@
       root.append("rect").attr("class", "rule").attr("x", 0).attr("y", 190).attr("width", W).attr("height", 8);
       root.append("image").attr("href", "assets/cover.jpg").attr("x", 0).attr("y", 198).attr("width", W).attr("height", 589).attr("preserveAspectRatio", "xMidYMid slice");
       root.append("rect").attr("class", "rule").attr("x", 0).attr("y", 787).attr("width", W).attr("height", 8);
-      root.append("rect").attr("class", "rule").attr("x", 0).attr("y", 2408).attr("width", W).attr("height", 8);
+      root.append("rect").attr("class", "rule").attr("x", 0).attr("y", 2528).attr("width", W).attr("height", 8);
       // Datos generales del álbum
       const stats = root.append("text").attr("class", "stats").attr("x", 40).attr("y", 868)
         .attr("tabindex", 0).attr("role", "button").attr("aria-label", `${data.album.title}. ${t.album}`)
@@ -280,18 +312,22 @@
       t.stats.forEach((s, i) => stats.append("tspan").attr("x", 40).attr("dy", i ? 25 : 0).text(s));
     }
 
-    // Tronco: el disco entero
-    const trunk = root.append("g").attr("class", "trunk");
-    tracks.forEach(d => drawWave(trunk, d, G[d.id].trunk.pts, G[d.id].trunk.w, "trunk", TRUNK_HALF));
-    // Ramas, de la última a la primera para que las ramas madre queden encima de sus brotes
+    // Tronco (de la silueta del árbol de la portada) y ramas de madera
+    const wood = root.append("g").attr("class", "tree-wood");
+    wood.node().appendChild(trunkNode.cloneNode(true));
+    Object.entries(LIMBS).forEach(([k, lay]) => {
+      wood.append("path").attr("class", "limb").attr("d", solid(G[k].pts, G[k].w));
+      wood.append("circle").attr("class", "limb").attr("cx", lay.c[0]).attr("cy", lay.c[1]).attr("r", lay.w[1]);
+    });
+    // Ramas de las canciones: primero los brotes de las caras B, luego las ramas del disco
     const branches = root.append("g").attr("class", "branches");
-    [...bsides].reverse().forEach(d => drawWave(branches, d, G[d.id].pts, G[d.id].w, "branch bside", SIZE.bside.HALF));
-    [...tracks].reverse().forEach(d => drawWave(branches, d, G[d.id].pts, G[d.id].w, "branch", HALF));
+    [...bsides].reverse().forEach(d => drawWave(branches, d, G[d.id], "branch bside", halfMax(SIZE.bside)));
+    [...tracks].reverse().forEach(d => drawWave(branches, d, G[d.id], "branch", halfMax(SIZE.album)));
 
     // Una copa interactiva por canción
     const layer = root.append("g").attr("class", "tracks");
     all.forEach(d => {
-      const id = d.id, lay = LAYOUT[id], { RD, SPIKE, L } = sz(d), isB = d.type === "bside";
+      const id = d.id, lay = LAYOUT[id], { RD, L } = sz(d), isB = d.type === "bside", SPIKE = isB ? 6 : 12;
       const g = layer.append("g")
         .attr("class", "track" + (isB ? " bside" : "")).attr("data-id", id)
         .attr("tabindex", 0).attr("role", "button")
@@ -300,10 +336,9 @@
         .on("keydown", ev => { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); activate(id); } });
 
       const r = g.append("g").attr("transform", `translate(${lay.c})`);
-      r.append("path").attr("class", "crown").attr("d", crownPath(d, 0, d.peaks.length - 1));
-      r.append("path").attr("class", "crown-prog");
       r.append("circle").attr("class", "disc").attr("r", RD);
-      r.append("circle").attr("class", "halo").attr("r", RD + SPIKE + 5);
+      r.append("path").attr("class", "crown-prog");
+      r.append("circle").attr("class", "halo").attr("r", RD + 6);
       drawRadar(r, L, d.features);
       r.append("path").attr("class", "mean").attr("d", radarPath(data.album.features_mean, L));
       const dot = r.append("circle").attr("class", "vdot").attr("r", 3.4).style("display", "none");
@@ -362,10 +397,12 @@
   }
 
   // Dibuja una onda (rama o tramo del tronco) con su progreso, su cabezal y su zona de pulsación
-  function drawWave(parent, d, pts, widths, kind, half) {
+  function drawWave(parent, d, geo, kind, half) {
+    const { pts, w: widths, core } = geo;
     const n = pts.length, g = parent.append("g").attr("class", "wave " + kind).attr("data-id", d.id);
-    g.append("path").attr("class", "core").attr("d", centerline(pts));
+    g.append("path").attr("class", "core").attr("d", solid(pts, core));
     g.append("path").attr("class", "wood").attr("d", ribbon(pts, widths, 0, n - 1));
+    g.append("path").attr("class", "core-prog");
     g.append("path").attr("class", "wood-prog");
     const ghost = g.append("line").attr("class", "ghost").style("display", "none");
     const head = g.append("g").attr("class", "playhead").style("display", "none");
@@ -387,8 +424,7 @@
     const onMove = ev => {
       const i = indexAt(ev);
       across(ghost, i, 7); ghost.style("display", null);
-      if (ev.pointerType !== "touch") showTip(`<b>${d.n}. ${d.title}</b> · ${mmss(fracOf(i) * durOf())}` +
-        (kind === "trunk" ? `<span class="tip-note">${T().trunkTip}</span>` : ""), ev);
+      if (ev.pointerType !== "touch") showTip(`<b>${d.n}. ${d.title}</b> · ${mmss(fracOf(i) * durOf())}`, ev);
     };
     const onLeave = () => { ghost.style("display", "none"); hideTip(); };
     g.append("path").attr("class", "wave-hit").attr("d", centerline(pts)).attr("stroke-width", half * 2 + 12)
@@ -398,7 +434,7 @@
       .on("pointercancel", () => { dragging = false; onLeave(); })
       .on("pointerleave", () => { if (!dragging) onLeave(); });
     // lo que hace falta para mover el progreso sin volver a dibujar
-    g.node().__wave = { pts, widths, half, across, n };
+    g.node().__wave = { pts, widths, core, half, across, n };
   }
 
   // ---------- Herramientas: comparar con la media y explorar por atributo ----------
@@ -419,7 +455,7 @@
     const f = state.explore;
     svg.classed("show-mean", state.compare).classed("exploring", !!f);
     const dim = (id, v) => {
-      svg.selectAll(`.track[data-id="${id}"] .crown, .track[data-id="${id}"] .disc`).style("fill-opacity", v);
+      svg.selectAll(`.track[data-id="${id}"] .disc`).style("fill-opacity", v);
       svg.selectAll(`.wave[data-id="${id}"] .wood, .wave[data-id="${id}"] .core`).style("opacity", v);
     };
     if (!f) { all.forEach(d => dim(d.id, null)); return; }
@@ -455,7 +491,7 @@
     });
     g.append("text").attr("class", "lg-caption").attr("x", cx).attr("y", cy + len + 78).text(t.meanCaption);
     // clave de lectura de los rótulos y de la metáfora
-    const kx = 372, ky = 1975;
+    const kx = 372, ky = 2075;
     const key = g.append("text").attr("class", "key").attr("x", kx).attr("y", ky);
     key.append("tspan").text(t.key.n + " ");
     key.append("tspan").text(t.key.song.toUpperCase());
@@ -463,11 +499,11 @@
     const how = g.append("text").attr("class", "howto").attr("x", kx).attr("y", ky + (t.key.lines.length + 1) * 22 + 22);
     t.howto.forEach((l, i) => how.append("tspan").attr("x", kx).attr("dy", i ? 20 : 0).text(l));
     // definiciones
-    let y = 2226;
+    let y = how.node().getBBox().y + how.node().getBBox().height + 26;
     LEGEND_ORDER.forEach(f => {
       g.append("use").attr("href", "#ic-" + f).attr("class", "lg-icon").attr("transform", `translate(52,${y - 5}) scale(0.95)`);
       const tx = g.append("text").attr("class", "lg-desc").attr("x", 74).attr("y", y);
-      y += wrapText(tx, [{ t: t.features[f][1] + ":", cls: "b" }, { t: t.features[f][2] }], 640, 18.5) * 18.5 + 3;
+      y += wrapText(tx, [{ t: t.features[f][1] + ":", cls: "b" }, { t: t.features[f][2] }], 590, 18) * 18 + 2;
     });
   }
 
@@ -479,7 +515,7 @@
     return `<span class="tip-title">${city} · ${what}</span>${text}`;
   }
   function drawCredits(root, t) {
-    const g = root.append("g").attr("class", "credits");
+    const g = root.append("g").attr("class", "credits").attr("transform", "translate(0,120)");
     const top = g.append("text").attr("class", "cr-top").attr("x", 750).attr("y", 2466);
     [t.band, t.members, ...t.creditsTop].forEach((l, i) => top.append("tspan").attr("x", 750).attr("dy", i ? 36 : 0).text(l));
     // mapa de los lugares del disco
@@ -755,6 +791,7 @@
       const wv = this.__wave, on = !!cur && this.dataset.id === cur.id, g = d3.select(this);
       const k = Math.round(frac * (wv.n - 1));
       g.select(".wood-prog").attr("d", on && k > 0 ? ribbon(wv.pts, wv.widths, 0, k) : null);
+      g.select(".core-prog").attr("d", on && k > 1 ? solid(wv.pts.slice(0, k + 1), wv.core.slice(0, k + 1)) : null);
       const head = g.select(".playhead").style("display", on ? null : "none");
       if (on) {
         wv.across(head.select("line"), k, 6);
@@ -767,9 +804,8 @@
       }
     });
     svg.selectAll(".crown-prog").each(function () {
-      const id = this.parentNode.parentNode.dataset.id, on = !!cur && id === cur.id;
-      const d = byId.get(id), k = Math.round(frac * (d.peaks.length - 1));
-      d3.select(this).attr("d", on && k > 0 ? crownPath(d, 0, k, true) : null);
+      const id = this.parentNode.parentNode.dataset.id, on = !!cur && id === cur.id, R = sz(byId.get(id)).RD;
+      d3.select(this).attr("d", on && frac > 0 ? d3.arc()({ innerRadius: R + 1.5, outerRadius: R + 6, startAngle: 0, endAngle: 2 * Math.PI * frac }) : null);
     });
     d3.select("#now-time").text(cur && player.dur ? `${mmss(pos)} / ${mmss(player.dur)}` : "");
   }
@@ -803,7 +839,7 @@
   d3.select("#now-toggle").on("click", () => { if (player.id) play(player.id); });
   // Para probar el progreso sin Spotify: index.html?debug y, en la consola, __jt.fake("exit", 0.4)
   if (new URLSearchParams(location.search).has("debug")) {
-    window.__jt = { player, fake(id, frac) { Object.assign(player, { id, dur: byId.get(id).duration_ms, pos: frac * byId.get(id).duration_ms, paused: true, started: true }); select(id); updatePlayerUI(); } };
+    window.__jt = { player, overlaps: checkOverlaps, fake(id, frac) { Object.assign(player, { id, dur: byId.get(id).duration_ms, pos: frac * byId.get(id).duration_ms, paused: true, started: true }); select(id); updatePlayerUI(); } };
   }
 
   // ---------- Teclado ----------
@@ -837,7 +873,7 @@
 
   // Las medidas de texto dependen de la fuente: se espera a que esté lista
   if (document.fonts && document.fonts.load) {
-    try { await Promise.all(["300 italic 20px 'Source Sans 3'", "600 italic 20px 'Source Sans 3'", "300 20px 'Source Sans 3'"].map(f => document.fonts.load(f))); } catch (e) { /* seguimos */ }
+    try { await Promise.all(["300 italic 20px 'JT Garamond Narrow'", "400 20px 'JT Garamond Narrow'", "300 20px 'JT Garamond'", "400 20px 'JT Garamond'"].map(f => document.fonts.load(f))); } catch (e) { /* seguimos */ }
   }
   render();
   const hash = decodeURIComponent(location.hash.slice(1));

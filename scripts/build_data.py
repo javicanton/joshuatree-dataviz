@@ -1,20 +1,17 @@
 #!/usr/bin/env python3
-"""Genera data/joshua-tree.json a partir de los MP3 y del SVG de radares de Flourish.
-Los ficheros fuente (los MP3 y 'U2 Joshua Tree songs.svg') no se suben al repositorio: el script los
-busca en la carpeta que contiene a esta (la carpeta de trabajo original del proyecto).
-Necesita ffmpeg y numpy. Uso: python3 scripts/build_data.py"""
+"""Genera data/joshua-tree.json a partir de los MP3 y de los atributos de Spotify descargados en 2022 (u2.xlsx).
+Los ficheros fuente no se suben al repositorio: el script busca los MP3 en la carpeta que contiene a esta
+y u2.xlsx una carpeta mas arriba. Necesita ffmpeg, numpy y openpyxl. Uso: python3 scripts/build_data.py"""
 import json, re, glob, os, math, subprocess
 import numpy as np
 
 SITE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))   # carpeta del sitio (el repositorio)
-ROOT = os.path.dirname(SITE)                                         # carpeta con los MP3 y el SVG de radares
-RADARS = "U2 Joshua Tree songs.svg"
+ROOT = os.path.dirname(SITE)                                         # carpeta con los MP3 (u2.xlsx esta una carpeta mas arriba)
 N_PEAKS = 1000
 FEATURES = ["danceability", "energy", "speechiness", "acousticness", "instrumentalness", "valence"]  # horario desde arriba
-R1000 = 77.7913     # radio del valor 1000 en los radares de Flourish (el anillo de 200 mide 15,558)
 
 # Datos editoriales. Los identificadores de Spotify son los de "The Joshua Tree (Remastered)" (2007).
-# bpm y tono: medidos sobre el audio (ver README); single: fecha de publicacion como sencillo (Wikipedia).
+# bpm y tono: se toman de Spotify (u2.xlsx) y los de esta tabla se ignoran; single: fecha de publicacion como sencillo (Wikipedia).
 # n -> (id, titulo, cara del vinilo, bpm, tono, fecha single, ambito del single, id de Spotify)
 EDIT = {
     1:  ("where-the-streets-have-no-name", "Where the Streets Have No Name", 1, 126, "D major", "1987-08-31", None, "5NxFDsVMGR6BFoO3fgK0vy"),
@@ -43,49 +40,28 @@ BSIDES = {
 # Duracion en Spotify (ms) de cada pista, para la barra de reproduccion antes de que el reproductor informe
 SPOTIFY_MS = {1: 336613, 2: 277480, 3: 295520, 4: 271546, 5: 257186, 6: 292866, 7: 176600, 8: 211813, 9: 322373, 10: 253040, 11: 314226}
 
-# ---------- Radares: se recuperan los seis valores de cada curva ----------
-def anchors(d):
-    """Puntos de ancla de un trazado SVG (M, L, H, V, C, S en absoluto o relativo)."""
-    toks = re.findall(r"[MmLlHhVvCcSsZz]|-?\d*\.?\d+(?:e-?\d+)?", d)
-    pts, cur, i, cmd = [], (0.0, 0.0), 0, None
-    need = {"M": 2, "L": 2, "H": 1, "V": 1, "C": 6, "S": 4}
-    while i < len(toks):
-        if re.match(r"[A-Za-z]", toks[i]): cmd = toks[i]; i += 1
-        if cmd in "Zz": continue
-        n = need[cmd.upper()]
-        v = [float(x) for x in toks[i:i + n]]; i += n
-        rel = cmd.islower(); c = cmd.upper()
-        if c == "H": cur = ((cur[0] if rel else 0) + v[0], cur[1])
-        elif c == "V": cur = (cur[0], (cur[1] if rel else 0) + v[0])
-        else: cur = ((cur[0] if rel else 0) + v[-2], (cur[1] if rel else 0) + v[-1])
-        pts.append(cur)
-        if cmd == "M": cmd = "L"
-        elif cmd == "m": cmd = "l"
-    if len(pts) > 1 and math.dist(pts[0], pts[-1]) < 0.3: pts.pop()
-    return pts
+# ---------- Atributos de Spotify: descarga de 2022 con spotifyr (u2.xlsx, en la carpeta de U2) ----------
+XLSX = os.path.join(os.path.dirname(ROOT), "u2.xlsx")
+DELUXE = "4mULDK6YXrFXTfSwvwm4M3"      # The Joshua Tree (Deluxe): disco 1 = album, disco 2 = caras B y extras
+HALF_TIME = {(1, 5)}                    # Running to Stand Still: Spotify da 188,5 (doble tiempo); se muestra la mitad
+KEYS = {"C#": "D♭", "D#": "E♭", "G#": "A♭", "A#": "B♭"}  # nombres habituales de los tonos con alteracion
 
-def radar_values():
-    s = open(os.path.join(ROOT, RADARS), encoding="utf-8").read()
-    titles = [t.replace("&apos;", "'") for t in re.findall(r'<text[^>]*class="st\d+ st2 st3">([^<]*)</text>', s)]
-    cells = re.findall(r'<g transform="translate\(([\d.]+), ([\d.]+)\)">\s*<g>\s*<rect[^>]*class="st0"', s)
-    curves = [anchors(d) for d in re.findall(r'<path id="line-\d+" class="st\d+" d="([^"]+)"', s)]
+def spotify_rows():
+    import openpyxl
+    ws = openpyxl.load_workbook(XLSX, read_only=True, data_only=True).active
+    rows = ws.iter_rows(values_only=True)
+    head = next(rows); ix = {k: i for i, k in enumerate(head)}
     out = {}
-    for title, (cx, cy) in zip(titles, cells):
-        c = (float(cx) + 123.8333, float(cy) + 19.8133 + 123.8333)
-        # la curva de esta celda es la que queda mas cerca de su centro (no siguen el orden de las celdas)
-        best = min(curves, key=lambda pp: max(math.dist(p, c) for p in pp))
-        pts = [(p[0] - c[0], p[1] - c[1]) for p in best]
-        assert len(pts) == 6 and max(math.hypot(*p) for p in pts) < 90, title
-        ang = lambda p: math.degrees(math.atan2(p[0], -p[1])) % 360
-        j = max(range(6), key=lambda k: math.hypot(*pts[k]))          # ancla fiable: la mas alejada del centro
-        k0 = round(ang(pts[j]) / 60) % 6
-        vals = {}
-        for n, p in enumerate(pts):
-            k = (k0 + n - j) % 6
-            r = math.hypot(*p)
-            assert r < 2 or abs(((ang(p) - k * 60 + 180) % 360) - 180) < 4, (title, n)
-            vals[FEATURES[k]] = round(r / R1000, 3)
-        out[title.lower()] = {f: vals[f] for f in FEATURES}
+    for r in rows:
+        if r[ix["album_id"]] != DELUXE: continue
+        disc, num = int(r[ix["disc_number"]]), int(r[ix["track_number"]])
+        tempo = float(r[ix["tempo"]]) / (2 if (disc, num) in HALF_TIME else 1)
+        note, mode = r[ix["key_name"]], r[ix["mode_name"]]
+        out[(disc, num)] = {
+            "features": {f: round(float(r[ix[f]]), 4) for f in FEATURES},
+            "bpm": round(tempo), "key": f"{KEYS.get(note, note)} {mode}",
+            "duration_ms": int(r[ix["duration_ms"]]), "track_name": r[ix["track_name"]],
+        }
     return out
 
 # ---------- Formas de onda: pico de amplitud por tramo ----------
@@ -98,10 +74,11 @@ def peaks(path):
     rms = np.array([math.sqrt(float((x[a:b] ** 2).mean())) for a, b in zip(edges[:-1], edges[1:])])
     return pk, rms, len(x) / 11025.0
 
-radars = radar_values()
+sp = spotify_rows()
 tracks, gmax, rmax = [], 0, 0
 for n in sorted(EDIT):
-    tid, title, side, bpm, key, single, scope, sid = EDIT[n]
+    tid, title, side, _bpm, _key, single, scope, sid = EDIT[n]
+    S = sp[(1, n)]; bpm, key = S["bpm"], S["key"]
     path = glob.glob(os.path.join(ROOT, f"{n:02d} *.mp3"))[0]
     pk, rms, secs = peaks(path)
     gmax, rmax = max(gmax, pk.max()), max(rmax, rms.max())
@@ -111,11 +88,12 @@ for n in sorted(EDIT):
         "id": tid, "n": n, "title": title, "type": "album", "side": side,
         "duration_ms": ms, "duration": f"{sec // 60}:{sec % 60:02d}",
         "bpm": bpm, "key": key, "single": single, "single_scope": scope,
-        "features": radars[title.lower()],
+        "features": S["features"],
         "spotify_id": sid, "spotify_uri": "spotify:track:" + sid,
         "wave_source": os.path.basename(path), "_pk": pk, "_rms": rms, "_secs": secs,
     })
-for k, (bid, (pre, title, parent, bpm, key, sid, ms)) in enumerate(BSIDES.items()):
+for k, (bid, (pre, title, parent, _bpm, _key, sid, ms)) in enumerate(BSIDES.items()):
+    S = sp[(2, k + 1)]; bpm, key = S["bpm"], S["key"]
     path = glob.glob(os.path.join(ROOT, f"{pre} *.mp3"))[0]
     pk, rms, secs = peaks(path)
     gmax, rmax = max(gmax, pk.max()), max(rmax, rms.max())
@@ -124,7 +102,7 @@ for k, (bid, (pre, title, parent, bpm, key, sid, ms)) in enumerate(BSIDES.items(
         "id": bid, "n": f"B{k + 1}", "title": title, "type": "bside", "parent": parent,
         "duration_ms": ms, "duration": f"{sec // 60}:{sec % 60:02d}",
         "bpm": bpm, "key": key, "single": None, "single_scope": None,
-        "features": radars[title.lower()],
+        "features": S["features"],
         "spotify_id": sid, "spotify_uri": "spotify:track:" + sid,
         "wave_source": os.path.basename(path), "_pk": pk, "_rms": rms, "_secs": secs,
     })

@@ -85,13 +85,15 @@ a { color: inherit; }
 #viz { display: block; width: 100%; height: auto; font-family: var(--font-narrow); }
 #viz text { fill: var(--gold); font-style: italic; font-weight: 300; }
 
-.big-title { font-size: 52px; text-anchor: middle; fill: #8f7c45 !important; }
+.big-title path { fill: #a58f4f; }
 .rule { fill: var(--gold); }
 .stats { font-size: 22.5px; cursor: pointer; outline: none; }
 .stats:hover, .stats:focus-visible, .stats.active { fill: var(--cream) !important; }
 
 /* Tronco y ramas: madera marrón; las ramas de las canciones son su forma de onda */
-#trunk-path, .limb { fill: var(--bark); }
+/* el tronco y las ramas de madera llevan los mismos tonos que las ramas de las canciones */
+.limb { fill: var(--wood); }
+.bark { fill: none; stroke: var(--wood-hi); stroke-width: 1.9; stroke-linecap: round; }
 .core { fill: var(--wood); }
 .wood { fill: none; stroke: var(--wood-hi); stroke-width: 1.9; stroke-linecap: round; transition: stroke .15s; }
 .bside .wood { stroke-width: 1.4; }

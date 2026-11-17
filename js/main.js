@@ -24,13 +24,17 @@
   const halfMax = S => S.C0 + S.SPK;
   const MIXED = new Set(["where-the-streets-have-no-name", "with-or-without-you", "bullet-the-blue-sky", "red-hill-mining-town"]);
 
+  // Tronco, dibujado tomando como referencia las fotos del árbol (portada, contraportada y Wikipedia, 1994):
+  // casi recto, con una ligera inclinación, la base ensanchada y pequeños abultamientos.
+  // P: curva de la base a la horquilla · base, top: semianchura abajo y arriba · flare: ensanche del pie
+  const TRUNK = { P: [[778, 2532], [792, 2310], [752, 2070], [773, 1872]], base: 52, top: 36, flare: 30 };
   // Ramas de madera (sin datos) que salen del tronco y de las que nacen las canciones.
   // p0: inicio (dentro del tronco) · c: final · a0, a1: ángulos de salida y llegada (0 = derecha, -90 = arriba)
   // k: tensión de la curva · w: semianchura al principio y al final
   const LIMBS = {
-    L: { p0: [748, 1900], c: [600, 1712], a0: -100, a1: -165, k: [0.55, 0.45], w: [30, 13] },
+    L: { p0: [752, 1905], c: [600, 1712], a0: -100, a1: -165, k: [0.55, 0.45], w: [32, 13] },
     C: { p0: [774, 1890], c: [768, 1565], a0: -90, a1: -95, k: [0.4, 0.4], w: [30, 13] },
-    R: { p0: [800, 1900], c: [950, 1722], a0: -80, a1: -15, k: [0.55, 0.45], w: [30, 13] }
+    R: { p0: [796, 1905], c: [950, 1722], a0: -80, a1: -15, k: [0.55, 0.45], w: [32, 13] }
   };
   // Ramas de las canciones. c: centro de la copa · from: [rama de la que nace, fracción de su longitud]
   // label: [x, y, alineación, anchura] del rótulo
@@ -64,13 +68,12 @@
   const LEGEND_C = [228, 2150], LEGEND_L = 78;
 
   // ---------- Carga ----------
-  const [data, texts, art, trunkSvg] = await Promise.all([
+  const [data, texts, art, titleSvg] = await Promise.all([
     d3.json("data/joshua-tree.json"),
     d3.json("data/texts.json"),
     d3.xml("assets/art.svg"),
-    d3.xml("assets/trunk.svg")
+    d3.xml("assets/title.svg")
   ]);
-  const trunkNode = document.importNode(trunkSvg.querySelector("#trunk-path"), true);
   const all = data.tracks;                                  // las 11 del disco y las 7 caras B
   const tracks = all.filter(t => t.type === "album");
   const bsides = all.filter(t => t.type === "bside");
@@ -166,6 +169,38 @@
     const pts = bezier(lay.p0, lay, 0);
     G[k] = { pts, w: pts.map((p, i) => lay.w[0] + (lay.w[1] - lay.w[0]) * Math.pow(i / (pts.length - 1), 0.8)) };
   });
+  // Generador pseudoaleatorio con semilla: la corteza sale siempre igual
+  const rng = seed => () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+  const trunk = (() => {
+    const pts = sampleBezier(TRUNK.P, 300, 0), n = pts.length - 1;
+    const base = i => { const t = i / n; return TRUNK.base + (TRUNK.top - TRUNK.base) * t + TRUNK.flare * Math.exp(-t * 11) + 2.5 * Math.sin(t * 19); };
+    return {
+      pts,
+      wl: pts.map((p, i) => base(i) + 2.2 * Math.sin(i / n * 41 + 1.3) + 1.2 * Math.sin(i / n * 97)),
+      wr: pts.map((p, i) => base(i) + 2.2 * Math.sin(i / n * 33 + 0.4) + 1.2 * Math.sin(i / n * 83 + 2))
+    };
+  })();
+  // Contorno de madera con anchuras distintas a cada lado
+  function solid2(pts, wl, wr) {
+    const a = [], b = [];
+    pts.forEach((p, i) => {
+      a.push(`${(p.x + p.nx * wl[i]).toFixed(1)},${(p.y + p.ny * wl[i]).toFixed(1)}`);
+      b.push(`${(p.x - p.nx * wr[i]).toFixed(1)},${(p.y - p.ny * wr[i]).toFixed(1)}`);
+    });
+    return "M" + a.join("L") + "L" + b.reverse().join("L") + "Z";
+  }
+  // Corteza: trazos cortos de través, como las hojas secas que cubren el tronco del árbol de Josué,
+  // que asoman un poco por los bordes. Es textura, no datos.
+  function bark(pts, wl, wr, gap, over, seed) {
+    const r = rng(seed), step = Math.max(1, Math.round(gap / (pts.len / (pts.length - 1))));
+    let d = "";
+    for (let i = 0; i < pts.length; i += step) {
+      const p = pts[i], a = wl[i] + over * (r() * r()), b = wr[i] + over * (r() * r());
+      const tilt = (r() - 0.5) * 3;
+      d += `M${(p.x + p.nx * a).toFixed(1)},${(p.y + p.ny * a + tilt).toFixed(1)}L${(p.x - p.nx * b).toFixed(1)},${(p.y - p.ny * b - tilt).toFixed(1)}`;
+    }
+    return d;
+  }
   const pointOn = (id, f) => { const pp = G[id].pts; const q = pp[Math.round(f * (pp.length - 1))]; return [q.x, q.y]; };
   function buildBranch(id) {
     if (G[id] && G[id].pts) return;
@@ -299,7 +334,9 @@
 
     if (!mobile) {
       // Cabecera: título, foto de portada entre dos filetes dorados
-      root.append("text").attr("class", "big-title").attr("x", 750).attr("y", 112).attr("textLength", 1290).attr("lengthAdjust", "spacing").text("THE JOSHUA TREE U2");
+      // título en contornos de ITC Garamond (assets/title.svg), como en la portada
+      const title = root.append("g").attr("class", "big-title").attr("role", "img").attr("aria-label", "The Joshua Tree, U2");
+      title.node().appendChild(document.importNode(titleSvg.querySelector("#title-outline"), true));
       root.append("rect").attr("class", "rule").attr("x", 0).attr("y", 190).attr("width", W).attr("height", 8);
       root.append("image").attr("href", "assets/cover.jpg").attr("x", 0).attr("y", 198).attr("width", W).attr("height", 589).attr("preserveAspectRatio", "xMidYMid slice");
       root.append("rect").attr("class", "rule").attr("x", 0).attr("y", 787).attr("width", W).attr("height", 8);
@@ -312,12 +349,14 @@
       t.stats.forEach((s, i) => stats.append("tspan").attr("x", 40).attr("dy", i ? 25 : 0).text(s));
     }
 
-    // Tronco (de la silueta del árbol de la portada) y ramas de madera
-    const wood = root.append("g").attr("class", "tree-wood");
-    wood.node().appendChild(trunkNode.cloneNode(true));
-    Object.entries(LIMBS).forEach(([k, lay]) => {
+    // Tronco y ramas de madera, del mismo color que las ramas de las canciones
+    const wood = root.append("g").attr("class", "tree-wood").attr("aria-hidden", "true");
+    wood.append("path").attr("class", "limb").attr("d", solid2(trunk.pts, trunk.wl, trunk.wr));
+    wood.append("path").attr("class", "bark").attr("d", bark(trunk.pts, trunk.wl, trunk.wr, 3.6, 9, 5));
+    Object.entries(LIMBS).forEach(([k, lay], j) => {
       wood.append("path").attr("class", "limb").attr("d", solid(G[k].pts, G[k].w));
       wood.append("circle").attr("class", "limb").attr("cx", lay.c[0]).attr("cy", lay.c[1]).attr("r", lay.w[1]);
+      wood.append("path").attr("class", "bark").attr("d", bark(G[k].pts, G[k].w, G[k].w, 3.4, 6, 11 + j));
     });
     // Ramas de las canciones: primero los brotes de las caras B, luego las ramas del disco
     const branches = root.append("g").attr("class", "branches");
